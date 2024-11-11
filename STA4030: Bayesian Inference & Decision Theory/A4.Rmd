@@ -1,0 +1,316 @@
+---
+title: "A4"
+author: "Zakariya Hussein - 665619"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Load Libraries
+
+```{r}
+library(ggplot2)
+library(tidyr)    
+library(dplyr)
+```
+
+### Introduction
+
+This analysis explores the concentration of hexachlorobenzene (HCB) in surface and bottom water layers at a site impacted by industrial activities. By comparing samples taken at each depth, we aim to determine if HCB levels vary significantly with depth and, if so, to quantify the extent and implications of these differences. Understanding these variations could reveal environmental factors, such as sedimentation, that contribute to higher pollutant accumulation at certain depths.
+
+**Mathematical Background and Model Specification**
+
+This analysis relies on the following assumptions and model structure:
+
+1.  **Independent Normal Distributions for Each Depth**:\
+    HCB concentrations at the surface and bottom are modeled as independent normal distributions with depth-specific means and precisions (inverse variances):
+
+    -   $X_{s,i} \sim N(\theta_s, \rho_s^{-1})$ for surface measurements
+    -   $X_{b,i} \sim N(\theta_b, \rho_b^{-1})$ for bottom measurements
+
+    Here, $\theta_s$ and $\theta_b$ represent the true mean HCB concentrations, while $\rho_s$ and $\rho_b$ are the precision parameters for each layer.
+
+2.  **Improper Reference Prior**:\
+    To avoid imposing strict assumptions, we use an improper reference prior $g(\theta_s, \theta_b, \rho_s, \rho_b) \propto \rho_s^{-1} \rho_b^{-1}$. This non-informative prior allows the data itself to drive parameter estimation.
+
+3.  **Likelihood Function**:\
+    The likelihood function, assuming a normal distribution, is specified as: $$
+    L(\theta, \rho | x) \propto \rho^{n/2} \exp\left(-\frac{\rho}{2}\sum_{i=1}^n (x_i - \theta)^2\right)
+    $$ where $n$ is the sample size for each depth.
+
+**Posterior Distribution**
+
+Given this model, the posterior distribution has a **normal-gamma** structure with the following components:
+
+1.  **Conditional Posterior for Mean**:\
+    The mean concentration for each depth, given precision, is normally distributed around the sample mean $\bar{x}$ with a variance that depends on both the sample size $n$ and precision $\rho$: $$
+    \theta|\rho,x \sim N(\bar{x}, (n\rho)^{-1})
+    $$
+
+2.  **Marginal Posterior for Precision**:\
+    The precision parameter for each depth follows a gamma distribution influenced by the sample size and variance: $$
+    \rho|x \sim \text{Gamma}(n/2 - 1, ns^2/2)
+    $$ where $s^2$ is the sample variance. This posterior form enables credible interval estimation for both the mean and precision, quantifying the uncertainty in each depth's HCB concentration.
+
+### Data Input & Preliminary Analysis
+
+The results suggest that HCB concentrations are higher at the bottom, with an average of 5.839 nanograms per liter compared to 4.804 nanograms per liter at the surface. This difference in means hints at depth-related accumulation, likely due to sedimentation or slower dispersal at greater depths. Additionally, the variance in bottom concentrations (1.0281) is notably larger than at the surface (0.3987), indicating greater fluctuation in bottom HCB levels. This variability may result from heterogeneous environmental conditions near the sediment, affecting pollutant levels more dramatically than at the surface.
+
+```{r setup, include=TRUE}
+set.seed(123)
+
+surface <- c(3.74, 4.61, 4.00, 4.67, 4.87, 5.12, 4.52, 5.29, 5.74, 5.48)
+bottom <- c(5.44, 6.88, 5.37, 5.44, 5.03, 6.48, 3.89, 5.85, 6.85, 7.16)
+
+# Calculate basic summary statistics
+n_s <- length(surface)  
+n_b <- length(bottom) 
+
+mean_s <- mean(surface)  
+mean_b <- mean(bottom)  
+var_s <- var(surface)   
+var_b <- var(bottom)     
+
+cat("Surface Sample Statistics:\n")
+cat("Sample size (n) =", n_s, "\n")
+cat("Sample mean (ȳ) =", round(mean_s, 4), "\n")
+cat("Sample variance (s²) =", round(var_s, 4), "\n\n")
+
+cat("Bottom Sample Statistics:\n")
+cat("Sample size (n) =", n_b, "\n")
+cat("Sample mean (ȳ) =", round(mean_b, 4), "\n")
+cat("Sample variance (s²) =", round(var_b, 4), "\n")
+```
+
+### Question 1: Posterior Distribution Derivation
+
+We calculate the posterior distribution for HCB concentrations in the Wolf River at two distinct depths: surface and bottom. The goal is to estimate the mean concentration, $\theta$, and precision (the inverse of variance), $\rho$, separately for each depth layer, utilizing observed data for both levels. The underlying assumption is that each depth has independent normal distributions for concentration, characterized by these depth-specific means and precisions.
+
+The joint posterior distribution for the parameters given the observed data $x$ is factored as follows: $$
+p(\theta_s, \theta_b, \rho_s, \rho_b \mid x) = p(\theta_s, \rho_s \mid x_s) \times p(\theta_b, \rho_b \mid x_b),
+$$ indicating that we can calculate the posterior distribution for each depth independently. For each layer, we model the precision parameter $\rho$ as following a Gamma distribution with parameters $a = \frac{n}{2} - 1$ and $b = \frac{n s^2}{2}$, where $n$ represents the sample size and $s^2$ the sample variance at that depth. The mean parameter $\theta$, conditional on the precision $\rho$, follows a normal distribution with a mean of $\bar{x}$ (the sample mean) and a variance of $(n \rho)^{-1}$. These parameter distributions reflect the observed data's impact on each depth's mean and precision estimates.
+
+```{r posterior_calculation}
+# Calculate posterior parameters for the normal-gamma distribution
+a_s_post <- n_s/2 - 1  
+
+b_s_post <- (n_s * var_s)/2  
+a_b_post <- n_b/2 - 1
+b_b_post <- (n_b * var_b)/2
+
+generate_posterior_samples <- function(n_samples, n, y_bar, s2) {
+
+  rho <- rgamma(n_samples, 
+                shape = n/2 - 1,  
+                rate = (n * s2)/2)  
+  theta <- rnorm(n_samples, 
+                 mean = y_bar,              
+                 sd = sqrt(1/(n * rho)))   
+  
+
+  return(list(theta = theta, rho = rho))
+}
+
+cat("Posterior Distribution Parameters:\n")
+cat("Surface measurements:\n")
+cat("Shape parameter (as) =", a_s_post, "\n")
+cat("Rate parameter (bs) =", b_s_post, "\n")
+cat("\nBottom measurements:\n")
+cat("Shape parameter (ab) =", a_b_post, "\n")
+cat("Rate parameter (bb) =", b_b_post, "\n")
+```
+
+To estimate 90% credible intervals, we calculate the 5th and 95th percentiles of the posterior distribution for each parameter. These percentiles provide the range within which each parameter likely falls with 90% probability, capturing the posterior uncertainty around both the mean and precision for surface and bottom concentrations. This Bayesian approach provides interval estimates that account for the variability and sample size, offering a probabilistic range for each parameter rather than a single-point estimate.
+
+$P(a \leq \theta \leq b|x) = 0.90$
+
+**Insight**
+
+The posterior results reveal a clear depth-dependent pattern in HCB concentration: bottom samples have both a higher mean concentration and greater variability than surface samples. This insight suggests that pollutants are more concentrated and less stable at greater depths, possibly due to environmental accumulation mechanisms such as sediment trapping or chemical binding in the sediment layer.
+
+```{r credible_intervals}
+
+n_samples <- 10000
+
+surface_post <- generate_posterior_samples(n_samples, n_s, mean_s, var_s)
+bottom_post <- generate_posterior_samples(n_samples, n_b, mean_b, var_b)
+
+calc_credible_interval <- function(x, level = 0.90) {
+  probs <- c((1-level)/2, 1-(1-level)/2)
+  quantile(x, probs)  
+}
+
+# Calculate 90% credible intervals for all parameters
+ci_theta_s <- calc_credible_interval(surface_post$theta)  # Surface mean
+ci_theta_b <- calc_credible_interval(bottom_post$theta)   # Bottom mean
+ci_rho_s <- calc_credible_interval(surface_post$rho)      # Surface precision
+ci_rho_b <- calc_credible_interval(bottom_post$rho)       # Bottom precision
+
+results_q1 <- data.frame(
+  Parameter = c("θs (Surface Mean)", "θb (Bottom Mean)", 
+                "ρs (Surface Precision)", "ρb (Bottom Precision)"),
+  Lower = round(c(ci_theta_s[1], ci_theta_b[1], ci_rho_s[1], ci_rho_b[1]), 4),
+  Upper = round(c(ci_theta_s[2], ci_theta_b[2], ci_rho_s[2], ci_rho_b[2]), 4)
+)
+
+print("90% Credible Intervals:")
+print(results_q1)
+```
+
+### Question 2: Monte Carlo Convergence Diagnostics
+
+The convergence diagnostics assess the stability of Monte Carlo samples from the posterior distribution of parameters representing HCB concentrations in surface and bottom water layers. These parameters include the mean concentrations for surface and bottom ($\theta_s$ and $\theta_b$, respectively) and the precision values ($\rho_s$ for surface and $\rho_b$ for bottom). Key diagnostics include the convergence of running means and the assessment of Monte Carlo standard errors, ensuring that the sample size of 10,000 is sufficient for reliable inference.
+
+#### Convergence of Surface Mean ($\theta_s$)
+
+In the first plot, "Convergence of Surface Mean ($\theta_s$)," we examine the running mean, calculated as: $$
+\hat{\mu}_n = \frac{1}{n} \sum_{i=1}^n X_i
+$$ where $X_i$ represents each sample from the posterior distribution of $\theta_s$. Initially, the running mean exhibits noticeable fluctuations but quickly stabilizes around a consistent mean after approximately 2,000 samples. This stabilization suggests that the estimate of $\theta_s$ has likely converged, meaning that further sampling would yield similar values, indicating reliable posterior inference.
+
+#### Convergence of Bottom Mean ($\theta_b$)
+
+The second plot, "Convergence of Bottom Mean ($\theta_b$)," displays a similar convergence pattern, where the running mean stabilizes after about 1,000 samples, aligning with the final mean value indicated by the red dashed line. The stable running mean implies that the estimate of $\theta_b$ is reliable, confirming that the Monte Carlo samples are sufficiently large for a robust posterior mean estimate for the bottom concentration.
+
+#### Convergence of Surface Precision ($\rho_s$)
+
+The third plot, "Convergence of Surface Precision ($\rho_s$)," reveals a convergence pattern with more pronounced initial variability, reflecting the higher sensitivity of precision parameters. Despite this, the running mean for $\rho_s$ stabilizes around the 2,000-sample mark, indicating adequate convergence. The Monte Carlo standard error, calculated as: $$
+\text{SE} = \sqrt{\frac{\text{Var}(X)}{n}}
+$$ would be small once convergence is achieved, confirming that $\rho_s$ has been estimated consistently. This convergence implies that the precision of the surface concentration can be reliably inferred from the posterior samples.
+
+#### Convergence of Bottom Precision ($\rho_b$)
+
+The final plot, "Convergence of Bottom Precision ($\rho_b$)," shows similar behavior to $\rho_s$, with fluctuations that settle around a stable mean by approximately 2,000 samples. This stabilization implies that the posterior estimate of $\rho_b$ is reliable and that the Monte Carlo sampling has adequately captured the precision for the bottom layer concentration. With convergence achieved, the Monte Carlo standard error for $\rho_b$ would also be low, supporting the stability and accuracy of this precision estimate.
+
+*Insights*
+
+Overall, these diagnostics confirm that the Monte Carlo samples for all four parameters---$\theta_s$, $\theta_b$, $\rho_s$, and $\rho_b$---have converged adequately. Each running mean aligns with a consistent value, suggesting that the sample size of 10,000 is sufficient to achieve a low Monte Carlo standard error, ensuring the accuracy of posterior credible intervals and probability estimates. Consequently, the Monte Carlo samples are reliable for making inferences about the depth-specific means and precision of HCB concentrations in the river, providing a solid basis for subsequent statistical analysis.
+
+```{r monte_carlo_diagnostics}
+
+assess_convergence <- function(samples, parameter_name) {
+  running_means <- cumsum(samples) / seq_along(samples)
+  plot(running_means, type = "l", 
+       main = paste("Convergence of", parameter_name),
+       xlab = "Number of Samples",
+       ylab = "Running Mean")
+  abline(h = mean(samples), col = "red", lty = 2)
+}
+
+par(mfrow = c(2,2)) 
+assess_convergence(surface_post$theta, "Surface Mean (θs)")
+assess_convergence(bottom_post$theta, "Bottom Mean (θb)")
+assess_convergence(surface_post$rho, "Surface Precision (ρs)")
+assess_convergence(bottom_post$rho, "Bottom Precision (ρb)")
+```
+
+### Question 3: Probability Comparisons
+
+We investigate pollutant concentration differences---specifically hexachlorobenzene (HCB)---between surface and bottom water samples from the Wolf River. Two key probabilities are calculated to assess these differences: the likelihood that the mean concentration at the bottom exceeds that at the surface, $P(\theta_b > \theta_s | x)$, and the probability that the variability in concentrations (standard deviation) is greater at the bottom than at the surface, $P(\sigma_b > \sigma_s | x)$, where $\sigma = \rho^{-1/2}$. These probabilities help quantify potential accumulation of pollutants in deeper water layers, which could pose environmental risks.
+
+The results reveal a 98.06% probability that the mean concentration at the bottom is higher than at the surface, with an average mean difference of 1.0354 ng/L. This significant increase in mean concentration suggests pollutant accumulation at greater depths, possibly due to settling effects over time. Additionally, there is an 89.94% probability that the bottom concentration variability exceeds that of the surface, with a mean standard deviation difference of 0.4703 ng/L. This finding indicates more fluctuating levels of pollutants at the bottom, likely reflecting variations in deposition or disturbance in deeper layers.
+
+Histograms of the posterior distributions for both the mean and standard deviation differences support these findings. The distributions are symmetric and centered around positive values, indicating that bottom concentrations are generally both higher and more variable. These visualizations reinforce the normality assumption and provide further evidence for depth-related differences in pollutant levels.
+
+In conclusion, this analysis strongly suggests that pollutant concentrations are higher and more variable at the bottom of the Wolf River compared to the surface. These findings highlight the potential ecological risks to bottom-dwelling organisms and underscore the importance of depth-specific environmental monitoring. This targeted approach can help inform remediation strategies aimed at reducing pollutant impact in affected ecosystems.
+
+```{r probability_analysis}
+prob_mean_diff <- mean(bottom_post$theta > surface_post$theta)
+
+sd_surface <- 1/sqrt(surface_post$rho)
+sd_bottom <- 1/sqrt(bottom_post$rho)  
+
+prob_sd_diff <- mean(sd_bottom > sd_surface)
+mean_diff <- mean(bottom_post$theta - surface_post$theta)  
+sd_diff <- mean(sd_bottom - sd_surface)                   
+
+cat("Probability Analysis Results:\n")
+cat("P(θb > θs) =", round(prob_mean_diff, 4), "\n")
+cat("Mean difference (θb - θs) =", round(mean_diff, 4), "ng/L\n")
+cat("P(σb > σs) =", round(prob_sd_diff, 4), "\n")
+cat("Mean SD difference (σb - σs) =", round(sd_diff, 4), "ng/L\n")
+
+par(mfrow = c(1,2))
+hist(bottom_post$theta - surface_post$theta, 
+     main = "Posterior Distribution of Mean Difference",
+     xlab = "θb - θs")
+hist(sd_bottom - sd_surface, 
+     main = "Posterior Distribution of SD Difference",
+     xlab = "σb - σs")
+```
+
+### Question 4: Model Assessment
+
+**Normality Assessment**
+
+To assess the assumption of normality in the distributions of HCB (hexachlorobenzene) concentrations at different depths (surface and bottom), we employ two techniques: Q-Q (quantile-quantile) plots and the Shapiro-Wilk test. These methods provide both visual and statistical evaluations of normality, which is crucial for validating the use of parametric methods in further analysis.
+
+1.  **Q-Q Plots**: The Q-Q plots compare the empirical quantiles of the sample data against the theoretical quantiles of a normal distribution. If the data is normally distributed, the points in these plots will align closely along the reference line, which represents the expected distribution under normality. For the surface and bottom HCB concentrations, the Q-Q plots reveal that the points largely adhere to the line, indicating an approximate normal distribution for both sample sets. Minor deviations are visible, particularly in the bottom sample data, suggesting slight departures from normality but not enough to raise significant concerns.
+
+2.  **Shapiro-Wilk Test**: The Shapiro-Wilk test provides a formal statistical test of normality, where the null hypothesis assumes that the data follows a normal distribution. The test statistic $W$ is computed as the ratio of the squared sum of weighted sample order statistics to the total squared deviation from the mean. For the surface data, we obtain $W = 0.9745$ with a p-value of 0.9294, and for the bottom data, $W = 0.9379$ with a p-value of 0.5303. Since both p-values are greater than the conventional significance level of 0.05, we fail to reject the null hypothesis, suggesting that both data sets are reasonably normal. This statistical evidence, in conjunction with the Q-Q plots, supports the normality assumption required for parametric analysis.
+
+*Distributional Comparison by Depth*
+
+To further understand the differences in HCB concentrations between surface and bottom samples, we visualize the data using box plots. The box plot illustrates the central tendency and variability of concentrations at each depth level, offering a straightforward comparison of distributions. The results indicate that bottom samples generally have a higher concentration of HCB than surface samples, with median values around 6 ng/L and 4.5 ng/L, respectively. Furthermore, the bottom samples show greater variability, with a wider interquartile range (IQR) and the presence of outliers. In contrast, the surface samples appear more consistent, with less spread and fewer outliers.
+
+*Insight*
+
+The combination of Q-Q plots and Shapiro-Wilk test results indicates that both surface and bottom HCB concentrations approximate normal distributions, making the assumption of normality reasonable for subsequent analysis. The box plot analysis reveals a marked difference in both mean and variability of concentrations between depths: bottom concentrations are not only higher on average but also exhibit greater variability compared to surface concentrations. These findings suggest that depth is a significant factor influencing HCB concentration levels, with elevated and more variable concentrations observed at the bottom depth.
+
+```{r normality_analysis}
+
+par(mfrow = c(1,2)) 
+
+qqnorm(surface, main="Q-Q Plot: Surface")
+qqline(surface)
+
+qqnorm(bottom, main="Q-Q Plot: Bottom")
+qqline(bottom) 
+
+# Perform Shapiro-Wilk tests for normality
+shapiro_surface <- shapiro.test(surface)
+shapiro_bottom <- shapiro.test(bottom)
+
+cat("\nNormality Tests:\n")
+cat("Surface Shapiro-Wilk test:\n")
+cat("W =", round(shapiro_surface$statistic, 4), 
+    ", p-value =", round(shapiro_surface$p.value, 4), "\n")
+cat("Bottom Shapiro-Wilk test:\n")
+cat("W =", round(shapiro_bottom$statistic, 4), 
+    ", p-value =", round(shapiro_bottom$p.value, 4), "\n")
+
+data_long <- data.frame(
+  Concentration = c(surface, bottom),
+  Depth = factor(rep(c("Surface", "Bottom"), each = 10))
+)
+
+ggplot(data_long, aes(x = Depth, y = Concentration, fill = Depth)) +
+  geom_boxplot() +                       
+  geom_jitter(width = 0.2, alpha = 0.5) + 
+  theme_minimal() +                       
+  labs(title = "HCB Concentration by Depth",
+       y = "Concentration (ng/L)") +
+  theme(legend.position = "none")       
+```
+
+### Comment on Analysis
+
+------------------------------------------------------------------------
+
+#### Depth Effect
+
+The analysis indicates a pronounced depth effect in HCB concentrations, with bottom water samples consistently showing higher concentrations than those taken from the surface. This conclusion is supported by the 90% posterior credible intervals, which show a distinct separation between the mean concentration estimates for the surface and bottom samples. The probability that the mean concentration at the bottom ($\theta_b$) exceeds the mean concentration at the surface ($\theta_s$) is approximately 0.982, suggesting that it is highly likely for bottom concentrations to be higher than surface concentrations. Quantitatively, the mean difference between bottom and surface concentrations is about 1.04 ng/L. This substantial difference implies that HCB accumulates more in bottom sediments, possibly due to factors such as sedimentation or slower water movement at the bottom, leading to a higher concentration of pollutants.
+
+#### Variability
+
+In addition to the mean difference, there is evidence that bottom samples exhibit greater variability than surface samples. The posterior credible intervals for the precision parameters (the inverse of variance) suggest a difference in the spread of concentrations at different depths. The probability that the standard deviation for bottom concentrations ($\sigma_b$) is higher than that for surface concentrations ($\sigma_s$) is approximately 0.9006, indicating a high likelihood of greater variability at the bottom. This greater variability suggests that bottom concentrations are influenced by a broader range of environmental factors, possibly due to more complex mixing or accumulation dynamics occurring in deeper sediments. This insight into variability is crucial for understanding how pollutants like HCB distribute differently across water layers.
+
+#### Model Adequacy
+
+The assumption of normality for the concentration data is well-supported by both statistical tests and visual assessments. Shapiro-Wilk tests conducted for surface and bottom samples yield p-values of 0.9294 and 0.5303, respectively, both well above the typical significance level, indicating that the normality assumption is not violated. Furthermore, Q-Q plots for both depth levels display good alignment with the theoretical quantiles of a normal distribution, reinforcing the suitability of using a normal model in the Bayesian analysis. This validation of the model's assumptions confirms the robustness of the Bayesian framework applied, providing confidence that the inferences drawn about depth-specific means and variances are reliable.
+
+#### Environmental Implications
+
+The findings have important environmental implications, specifically highlighting the presence of HCB stratification by depth. This depth-specific concentration pattern underscores the need for targeted environmental monitoring strategies, especially in areas near industrial or waste disposal sites where pollutants can accumulate in sediments. The observed differences in mean concentration and variability suggest that routine sampling should account for depth to accurately capture pollutant distribution. Regular depth-specific monitoring would not only improve the precision of contamination assessments but also help track changes over time, providing early warnings for potential ecological impacts. These results suggest that environmental agencies and researchers should consider implementing sampling protocols that differentiate between surface and bottom samples to more effectively monitor pollutant behavior in aquatic ecosystems.
+
+*Insight*
+
+In conclusion, the Bayesian analysis provides strong evidence that HCB concentrations in the Wolf River are significantly higher and more variable at the bottom than at the surface. The assumption of normality is validated by the analysis, making the Bayesian inference model robust and reliable for this study. These findings have practical implications, advocating for depth-differentiated sampling methods to better understand and manage pollutant distribution in water bodies. The study illustrates the power of Bayesian methods in environmental science, providing actionable insights for future monitoring and risk assessment efforts concerning industrial pollutants like HCB.
